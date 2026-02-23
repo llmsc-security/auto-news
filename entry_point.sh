@@ -6,21 +6,33 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Function: initialize Airflow database if needed
+init_database() {
+    local airflow_cmd="airflow"
+    log "Initializing Airflow database..."
+    $airflow_cmd db init
+    log "Database initialization complete"
+}
+
 # Function: start the HTTP service (Airflow webserver)
 start_service() {
     log "Starting Auto-News HTTP service..."
-    
+
+    # Initialize database first
+    init_database
+
     # Set environment variables
     export WORKDIR=/opt/airflow
     export PYTHONUNBUFFERED=1
-    
+
     # Check for config files
     if [ -f ".env.template" ] && [ ! -f ".env" ]; then
         log "Copying environment template..."
         cp .env.template .env
     fi
-    
+
     # Default command is airflow webserver on port 8080
+    # Use system airflow (from base image) for database init and webserver
     local cmd="${AUTO_NEWS_CMD:-airflow}"
     local args="${AUTO_NEWS_ARGS:-webserver}"
 

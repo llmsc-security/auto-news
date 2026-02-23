@@ -1,8 +1,8 @@
 # Multi-stage build for Auto-News
 # -------------------------------------------------
-#  Builder stage – compile and install Python deps
+#  Builder stage - compile and install Python deps
 # -------------------------------------------------
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -28,27 +28,31 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 ENV PIP_NO_CACHE_DIR=1
 
-# Install Python packages - copy the pyproject.toml and install
-COPY pyproject.toml .
+# Install Python packages - copy files needed for installation
+COPY pyproject.toml README.md ./
 RUN pip install --default-timeout=300 --no-cache-dir .
 
 # -------------------------------------------------
-#  Runtime stage – lightweight image with app code
+#  Runtime stage - lightweight image with app code
 # -------------------------------------------------
 FROM apache/airflow:2.8.4-python3.11
 
 ARG DEBIAN_FRONTEND=noninteractive
+
+# Switch to root to install packages (base image switches to airflow user)
+USER root
 
 WORKDIR /opt/airflow
 
 ENV WORKDIR=/opt/airflow
 ENV PYTHONUNBUFFERED=1
 ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+# Put system airflow path first, then venv for custom dependencies
+ENV PATH="/usr/local/bin:${VIRTUAL_ENV}/bin:${PATH}"
+ENV PIP_USER=false
 
-# Install additional system dependencies
-RUN set -ex; \
-  apt-get update && apt-get install -y --no-install-recommends \
+# Install additional system dependencies (run as root explicitly)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     g++ \
     curl \
@@ -67,11 +71,12 @@ RUN set -ex; \
 # Copy the pre-built virtual environment from the builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy requirements.txt and install Python dependencies
-COPY docker/requirements.txt .
+# Copy requirements.txt from docker folder and install
+COPY docker/requirements.txt /opt/airflow/requirements.txt
 RUN set -ex; \
-  pip install --no-cache-dir -r requirements.txt && \
-  rm -rf ~/.cache/pip
+    /opt/venv/bin/pip install --upgrade pip --isolated; \
+    /opt/venv/bin/pip install --no-cache-dir --default-timeout=300 -r /opt/airflow/requirements.txt; \
+    rm -rf ~/.cache/pip
 
 # Copy DAGs
 COPY dags/ /opt/airflow/dags/
@@ -80,11 +85,15 @@ COPY dags/ /opt/airflow/dags/
 COPY --chown=airflow:airflow ./src /opt/airflow/run/auto-news/src
 COPY --chown=airflow:airflow . .
 
+# Copy the entrypoint script that initializes the database
+COPY entry_point.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Switch to airflow user
 USER airflow
 
 # Expose any relevant ports (Airflow webserver if needed)
 EXPOSE 8080
 
-# Default command
-CMD ["airflow", "webserver"]
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]

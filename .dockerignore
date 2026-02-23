@@ -1,2 +1,9 @@
 .git
-./workspace
+workspace/
+docker_backup/
+docker/milvus/
+docker/postgres/
+docker/mysql/
+docker/redis/
+docker/airflow/
+docker/workspace/
